@@ -1,0 +1,16 @@
+#!/usr/bin/expect
+
+spawn telnet localhost 53058
+expect "=>"
+send "logon administrator netscout1\r"
+expect "=>"
+send "pur aud\r"
+expect "=>"
+send "sho lic\r"
+expect "=>"
+send "sho swi *\r"
+expect "=>"
+send "logoff\r"
+expect "=>"
+send "exit\r"
+expect EOF

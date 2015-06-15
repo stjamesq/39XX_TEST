@@ -1,0 +1,41 @@
+# Script will transfer stty file to 39XX - this will enable PROCOMM functionality
+# Automatically abort script on errors
+option batch abort
+# Disable overwrite confirmations that conflict with the previous
+option confirm off
+# Connect using a password
+open %1%
+# Connect
+# open sftp://user@example.com -hostkey="ssh-rsa 1024 xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx"
+# Change remote directory
+option transfer binary
+cd /bin
+put k:\Aspect_Scripts\LINUX-SCRIPTS\stty
+put k:\Aspect_Scripts\LINUX-SCRIPTS\BAK.stty
+chmod 755 BAK.stty
+chmod 755 stty
+mkdir /opt/test
+cd /opt/test
+put k:\Aspect_Scripts\LINUX-SCRIPTS\39XX_TEST.sh
+put k:\Aspect_Scripts\LINUX-SCRIPTS\39XX_TEST_NEW.sh
+put k:\Aspect_Scripts\LINUX-SCRIPTS\getLIC.exp
+put k:\Aspect_Scripts\LINUX-SCRIPTS\getINFO.exp
+put k:\Aspect_Scripts\LINUX-SCRIPTS\getBLADEINFO.exp
+put k:\Aspect_Scripts\LINUX-SCRIPTS\getBLADEINFO_NEW.exp
+put k:\Aspect_Scripts\LINUX-SCRIPTS\getDIAGS.exp
+put k:\Aspect_Scripts\LINUX-SCRIPTS\getDIAGS_NEW.exp
+chmod 755 39XX_TEST.sh
+chmod 755 39XX_TEST_NEW.sh
+chmod 755 getLIC.exp
+chmod 755 getINFO.exp
+chmod 755 getBLADEINFO.exp
+chmod 755 getBLADEINFO_NEW.exp
+chmod 755 getDIAGS.exp
+chmod 755 getDIAGS_NEW.exp
+cd /HorizON/Server
+put k:\Aspect_Scripts\LINUX-SCRIPTS\MLFDecoder
+chmod 755 MLFDecoder
+# Disconnect
+close
+# Exit WinSCP
+exit

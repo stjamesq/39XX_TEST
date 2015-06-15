@@ -1,0 +1,1564 @@
+
+
+;This script was written to capture final test data from a 3900 loaded chassis or Single P-Blade
+;Created on 12/30/2013 by Q. St. James
+;Original script template created by A. Lalli
+;Updated on 02/21/2014 - QOS - Initial Release of Rev 0
+;Updated on 03/07/2014 - QOS - Added support for 03.02.02.19 software
+;Updated on 03/12/2014 - QOS - Released test script to Rev A
+;Updated on 04/11/2014 - QOS - Added support for 03.02.03.10 software
+;Updated on 05/15/2014 - QOS - Added support for testing PFS Manager (R320) 03.02.03.10
+;Modified on 5/21/2014 to add Linda Vivier to TechList.  DBL.
+;Modified on 6/11/2014 - QOS - Added support for OpenSSL patch for 3.2.2.19 and 3.2.3.10 (S/W numbers changed)
+;Modified on 7/7/2014 - QOS - Added support for new version 03.03.000.045 S/W for PFS 39XX, PFS Manager(R320), and PFS w/ PM(R720)
+;Modified on 11/5/2014 - QOS - Added support for new version 03.04.000.023 S/W for PFS 39XX, PFS Manager(R320), and PFS w/ PM(R720)
+;Modified on 01/29/2015 - QOS - Added support for new version 03.04.001.011 S/W for PFS 39XX, PFS Manager(R320), and PFS w/ PM(R720)
+;Modified on 03/04/2015 - QOS - Added support for up to 6 additional licenses that can be scanned in to check the additional license count on 39XX
+;							  + All additional licenses will be scanned in just before the test command is run.
+;Modified on 03/26/2015 - QOS - Updated to collect the board option - 0001 indicates non-digipot, 0005 indicates DIGIPOT
+;							  + Also adding a board diagnostics test that will more thoroughly check board voltages on each blade
+;Modified on 05/28/2015 - QOS - Updated the method of collecting log information (use global array to store 20x the amount of data)
+;Modified on 06/05/2015 - QOS - Updated to add software version 03.05.000.025 S/W for PFS39XX Product Line (Including Management Servers)
+
+;GLOBAL VARIABLES (Reserved for Data Arrays)
+string LOG_OUTPUT[21]
+string PBLADE_MODEL[3]
+string PBLADE_SERIAL[3]
+
+proc main
+
+   string TECH_ID
+   string SCAN_SO
+   string SW_VER
+   string SCAN_SERIAL
+   string SCAN_MAC
+   string SCAN_MODEL
+   string SCAN_PART
+   string SCAN_ITEM
+   string SCN_PBLADE_NUM
+   integer NUMBLADES
+   string TEST_TYPE
+   string CHASSIS
+   string script_CALL = ""
+   
+   string Problem_Fname = "K:\MFG_TEST\Problem_log.txt"	 	;$$$ C:
+      
+   integer Xmit_stat = 0
+   string Xmit_string = ""
+   integer data_index
+   integer PRELOAD
+   
+   string Outdata = ""
+;  string Oracle_data
+   string Out_Array[19]
+   string Test_results = "PASS"
+   string WO_Number = "Coming soon"
+   string Fname = "K:\MFG_TEST\AFM_log.txt" 	 ;$$$ C:
+   string Fname2 = "K:\MFG_TEST\RMM_log.txt"	;$$$ C:
+   string Fname4 = "K:\MFG_TEST\39XX_log.txt"
+   
+   when TARGET 0 "TEST FAILED" call SCRIPT_FAILURE
+   
+   ;***************************************Define and initialize OUT_ARRAY************************************
+;
+; The Variable OUT_ARRAY[18]  contains 18 fields (indexed 0-17) with system information that will be written to Oracle for data collection purposes.
+; Field definitions: If the variable does not have a variable name tied to it, it will instead have the <LINUX> symbol to note it is collected by the linux script
+  OUT_ARRAY[0] = ""	;SCAN_SERIAL	; This value will be the scanned serial number SCAN_SERIAL including the suffix "A" "B" or "C++"
+  OUT_ARRAY[1] = ""	;SCAN_MAC	; This is the formatted MAC address from the command "ifconfig -a |grep eth0" with "-" substituted for ":"s.  If the system fails electrically before the MAC address can be read, this value will be the scanned MAC address ScanMac
+  OUT_ARRAY[2] = ""	;SCAN_MODEL	; This is the formatted Model number scanned in by the test tech.  the "/" and "\" have been removed.
+  OUT_ARRAY[3] = ""	;<LINUX>ALTA_REV	; This is the revision of the ALTA chip collected by the debug log for the FIRST PBLADE ONLY. All other blades will be verified to match this version
+  OUT_ARRAY[4] = ""	;<LINUX>UBOOT VERSION	; This is the Uboot version of the FIRST PBLADE ONLY. All other blades will be verified to match this version
+  OUT_ARRAY[5] = ""	;<LINUX>KERNEL	; This is the actual Kernel Version from uname -a. If the system fails electrically before uname can be read this value will remain blank in the output data.
+  OUT_ARRAY[6] = ""	;<LINUX>CPU_SPEED	; This is the actual CPU Speed from DMI. If the system fails electrically before the DMI can be read this value will remain blank in the output data.
+  OUT_ARRAY[7] = ""	;<LINUX>CPU_TYPE	; This is the actual CPU name as listed by lspci (should be Freescale)
+  OUT_ARRAY[8] = $Date			; This is the actual DATE from the Procomm PC when the test was run.
+  OUT_ARRAY[9] = $TIME24 		; This is the actual TIME from the Procomm PC that the test was performed displayed in military 24H format.
+  OUT_ARRAY[10] = ""	;TECH_ID		; This is the Technician's username entered at the beginning of the test script.
+  OUT_ARRAY[11] = ""	;<LINUX>REAL_SW_VERSION	; This is the actual Software Version from decoderelease.properties. If the system fails electrically before decoderelease.properties can be read this value will be Scan_Software_Ver.
+  OUT_ARRAY[12] = ""	;<LINUX>MICRO_SD_CAPACITY	; This is the size of the Micro SD card in the FIRST PBLADE ONLY. All other blades will be tested to meet this size requirement.
+  OUT_ARRAY[13] = ""	;SCAN_SO	; This is the WO Number Scanned in at the beginning of the test.  If there is no WO number then the Script allows for "NA" to be entered and asks for and RMA Number.
+  OUT_ARRAY[14] = ""	;SCAN_ITEM	; This is the Item Number Scanned at the beginning of the test. If no Item number is available the test technician should enter the first 4 digits of the Model number.
+  OUT_ARRAY[15] = ""	;TEST_TYPE (COMP/FULL) Will set the flag to test either one P-BLADE or an entire configuration of P-BLADES - This is the Test Type chosen from a pull-down list at the beginning of the script.
+  OUT_ARRAY[16] = ""	;<LINUX>PASS_FLAG	; This is the PASS or FAIL status of the test.  Pass status is populated at the sucessful completion of the test. Fail status is populated when any failure condition is met.
+  OUT_ARRAY[17] = ""	;SCAN_RMA	; This is the RMA Number entered at the beginning of the test script.  It is only populated if there is no WO number.
+  OUT_ARRAY[18] = ""	;<LINUX>FAIL_REASON ; This is the reason the test failed.  It is either automatically generated or entered by the test tech when the system fails.
+      
+;### [BEGIN] - This is the beginning of the test process ###
+	
+;### Collect Tech ID and Platform Test Type ###
+	TECH_ID = getTECHID()
+	TEST_TYPE = getTESTTYPE()
+	
+;### Ask the user to activate serial connectivity
+	if not strfind TEST_TYPE "MANAGER"
+		PRELOAD = preloadSWITCH()
+		if PRELOAD == 1
+			loadTESTFILES()
+			pause 3
+			usermsg "Preloading Test Files - COMPLETE!"
+			usermsg "Refer back to the QWI to reset IP to defaults"
+			halt
+		endif	
+	endif
+
+;### Collect all other pertinent information from the Tech ###
+	SW_VER = getSW_VER()
+	SCAN_SO = getSALESORDER()
+	CHASSIS = getCHASSIS(TEST_TYPE)
+	SCAN_MAC = getMAC()
+	if strfind TEST_TYPE "P-BLADE"
+		SCAN_SERIAL = "NULL"
+		SCAN_MODEL = "NULL"
+		SCAN_ITEM = "NULL"
+	else
+		SCAN_SERIAL = getSERIAL()
+		SCAN_MODEL = getMODEL(TEST_TYPE)
+		SCAN_ITEM = getITEM(SCAN_MODEL)
+	endif
+	
+	if strfind SCAN_MODEL "3903"
+		SCN_PBLADE_NUM = getPBLADENUM()
+	elseif strfind SCAN_MODEL "5512"
+		SCN_PBLADE_NUM = "0"
+	else
+		SCN_PBLADE_NUM = "1"
+	endif
+	atoi SCN_PBLADE_NUM NUMBLADES
+	
+	if strfind TEST_TYPE "FULL SWITCH"
+		for data_index = 0 upto 2
+			if data_index < NUMBLADES
+				if data_index == 0
+					PBLADE_MODEL[data_index] = SCAN_MODEL
+				else
+					PBLADE_MODEL[data_index] = getPBLADE_MODEL(data_index)
+				endif
+			else
+				PBLADE_MODEL[data_index] = "NULL"
+			endif
+		endfor
+		for data_index = 0 upto 2
+			if data_index < NUMBLADES
+				PBLADE_SERIAL[data_index] = getPBLADE_SERIAL(data_index)
+			else
+				PBLADE_SERIAL[data_index] = "NULL"
+			endif
+		endfor
+	else
+		for data_index = 0 upto 2
+			if data_index < NUMBLADES
+				PBLADE_SERIAL[data_index] = getPBLADE_SERIAL(data_index)
+				SCAN_PART = getPARTNUM()
+				PBLADE_MODEL[data_index] = SCAN_PART
+			else
+				PBLADE_SERIAL[data_index] = "NULL"
+				PBLADE_MODEL[data_index] = "NULL"
+			endif
+		endfor
+	endif
+
+;### Login to 3900 Linux Console ###
+	logIN(TEST_TYPE)
+
+	if not strfind TEST_TYPE "MANAGER"
+		;### Prepare the Linux Script and Run it ###
+		scriptCALL(TEST_TYPE,SW_VER,SCAN_SERIAL,SCAN_MODEL,TECH_ID,SCAN_SO,SCAN_ITEM,SCAN_MAC,SCN_PBLADE_NUM,CHASSIS)
+		runSCRIPT(TEST_TYPE)
+	else
+		;### Run the PFS Manager PROCOMM Test Script ###
+		testPFSMANAGER(SW_VER,SCAN_SERIAL,SCAN_MODEL,TECH_ID,SCAN_SO,SCAN_ITEM,SCAN_MAC,CHASSIS)
+	endif
+	
+;	### If all has succeeded, display a "happy" message at the end ###
+	pause 1
+	usermsg "CONGRATULATIONS %s! FINAL TEST PASSED!" TECH_ID
+	halt   
+endproc
+
+
+;*************************[LIST PROCESSES BELOW]*******************************
+
+;******************************************************************************
+;### Fix Serial Console? YES or NO ###
+func preloadSWITCH : integer
+integer DFAULT = 0
+integer Choice
+
+sdlgmsgbox "Download Script Files" "Would you like to download all script files?" QUESTION YESNO Choice
+
+if Choice == 6
+	DFAULT = 1
+endif
+
+return DFAULT
+endfunc
+;******************************************************************************
+
+;******************************************************************************
+;### Enable Serial Connectivity by replacing bugged file ###
+proc loadTESTFILES
+string CP_TEST = "K:\WINSCP3\WinSCP3.exe /console /script=K:\Aspect_Scripts\LINUX-SCRIPTS\39XX_CPTEST.txt root:r00tme@10.100.150."
+string IP
+
+		IP = getSTATIC_IP()
+		statmsg "Using tech submitted IP address %s" IP
+		strcat CP_TEST IP
+		DOS CP_TEST MAXIMIZED
+		
+endproc
+;******************************************************************************
+
+;******************************************************************************
+;### test PFS MANAGER via this process ###
+proc testPFSMANAGER
+param string SW_VER
+param string SCAN_SERIAL
+param string SCAN_MODEL
+param string TECH_ID
+param string SCAN_SO
+param string SCAN_ITEM
+param string SCAN_MAC
+param string CHASSIS
+string TESTDATE = $Date
+string TESTTIME = $TIME24
+string GET_LIC
+string LIC_LINE = "Switch Count: "
+string ProblemID[7]
+string PID
+string RESULT = "PASS"
+string NOTTHEONLYONE = "MAYBESOMEDAYYOUWILLJOINUSANDTHEWORLDWILLBEASONE"
+integer dataindex
+string Xmit_string
+integer Xmit_stat = 0
+string OUTFILE = "K:\MFG_TEST\39XX_log.txt"
+string newSERIAL
+integer serLEN
+integer maxLEN = 26
+
+strlen SCAN_SERIAL serLEN
+if serLEN > maxLEN
+	substr newSERIAL SCAN_SERIAL 0 maxLEN
+else
+	newSERIAL = SCAN_SERIAL
+endif
+
+transmit "^M"
+waitfor "=>" 5
+if FAILURE
+	errormsg "Cannot Access a Telnet Session - Please Contact Tech OPS"
+	halt
+else
+	transmit "logon administrator netscout1^M"
+	waitfor "=>" 5
+	if FAILURE
+		errormsg "Cannot Access a Telnet Session - Please Contact Tech OPS"
+		halt
+	endif
+endif
+
+Xmit_string = "sho lic"
+Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+if Xmit_stat == 99
+	call Not_responding
+endif
+waitfor newSERIAL 5
+if FAILURE
+	ProblemID[1] = "FAILED - INCORRECT PRODUCT ID FOUND"
+endif
+
+Xmit_string = "sho lic"
+Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+if Xmit_stat == 99
+	call Not_responding
+endif
+waitfor LIC_LINE 5
+if FAILURE
+	ProblemID[2] = "FAILED - COULD NOT GET LICENSING INFORMATION"
+else
+	rget GET_LIC
+	strcat LIC_LINE GET_LIC
+	strreplace LIC_LINE "^M" ""
+	if strfind LIC_LINE "Switch Count: 32"
+		statmsg "32 Switches Supported"
+	else
+		ProblemID[2] = "FAILED - INCORRECT SWITCH COUNT"
+	endif
+	if strfind LIC_LINE "CLI Sessions: 1/32"
+		statmsg "32 CLI Sessions Supported"
+	else
+		ProblemID[3] = "FAILED - INCORRECT CLIENT SESSIONS"
+	endif
+	if strfind LIC_LINE "UI Clients: 0/16"
+		statmsg "16 UI Clients Supported"
+	else
+		ProblemID[4] = "FAILED - INCORRECT UI CLIENTS"
+	endif
+endif
+
+Xmit_string = "sho serv"
+Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+if Xmit_stat == 99
+	call Not_responding
+endif
+waitfor "10.0.1.1" 5
+if FAILURE
+	ProblemID[5] = "FAILED - IP IS NOT DEFAULT 10.0.1.1 IP ADDRESS"
+else
+	statmsg "IP Address is Set Correctly"
+endif
+
+Xmit_string = "sho stat"
+Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+if Xmit_stat == 99
+	call Not_responding
+endif
+waitfor SW_VER 5
+if FAILURE
+	ProblemID[6] = "FAILED - SOFTWARE VERSION "
+	strcat ProblemID[6] SW_VER
+	strcat ProblemID[6] " IS NOT FOUND"
+else
+	statmsg "IP Address is Set Correctly"
+endif
+
+for dataindex = 1 upto 6
+	if strfind ProblemID[dataindex] "FAILED"
+		RESULT = "FAIL"
+	endif
+endfor
+
+if fopen 1 OUTFILE APPEND
+	fputs 1 TESTDATE
+	fputs 1 ","
+	fputs 1 TESTTIME
+	fputs 1 ","
+	fputs 1 TECH_ID
+	fputs 1 ","
+	fputs 1 SCAN_SERIAL
+	fputs 1 ","
+	fputs 1 CHASSIS
+	fputs 1 ","
+	fputs 1 SCAN_MAC
+	fputs 1 ","
+	fputs 1 SCAN_MODEL
+	fputs 1 ","
+	fputs 1 SCAN_ITEM
+	fputs 1 ","
+	fputs 1 SCAN_SO
+	fputs 1 ",,"
+	fputs 1 SW_VER
+	fputs 1 ",,,,,,,,,,,,,,,,,,,,,,,,,,,"
+	fputs 1 LIC_LINE
+	fputs 1 ",FINAL,"
+	for dataindex = 1 upto 6
+		if strfind ProblemID[dataindex] "FAILED"
+			RESULT = "FAIL"
+		endif
+	endfor
+	fputs 1 RESULT
+	fputs 1 ","
+	if strfind RESULT "FAIL"
+		errormsg "SCRIPT FAILED - CONTACT TECH OPS"
+		for dataindex = 1 upto 6
+			if strfind ProblemID[dataindex] "FAILED"
+				if strfind NOTTHEONLYONE "YES"
+					fputs 1 " & "
+				endif
+				fputs 1 "PID "
+				itoa dataindex PID
+				fputs 1 PID
+				fputs 1 ": "
+				fputs 1 ProblemID[dataindex]
+				NOTTHEONLYONE = "YES"
+			endif
+		endfor
+	else
+		usermsg "Congratulations %s - TEST PASSED!" TECH_ID
+	endif
+	fclose 1
+else
+	errormsg "Problem opening file %s.  Data has not been saved" OUTFILE
+	errormsg "CONTACT TECH OPS IMMEDIATELY"
+endif
+if fopen 1 OUTFILE APPEND TEXT
+	fputs 1 ""
+	fclose 1
+else
+	errormsg "Problem opening file %s.  Data has not been saved" OUTFILE
+	errormsg "CONTACT TECH OPS IMMEDIATELY"
+endif
+halt
+
+endproc
+;******************************************************************************
+
+;******************************************************************************
+;### Run LINUX script via this process ###
+proc runSCRIPT
+param string TEST_TYPE
+;string OUTPUT
+;string OUTPUT2
+;string OUTPUT3
+;string OUTPUT4
+string Xmit_string = "cd /opt/test"
+integer Xmit_stat = 0
+integer LINE
+
+	pause 1
+	transmit "^M"
+	waitfor "Test Function : " 360
+	if FAILURE
+		errormsg "Final Test appears to have stopped responding - Please Contact Tech OPS"
+		halt
+	endif
+	
+	Xmit_string = "LOAD"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+	if Xmit_stat == 99
+		call Not_responding
+	endif
+	waitfor "Test Function : " 360
+	if FAILURE
+		errormsg "Final Test appears to have stopped responding - Please Contact Tech OPS"
+		halt
+	endif
+	
+	Xmit_string = "TEST"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+	if Xmit_stat == 99
+		call Not_responding
+	endif
+	waitfor "Test Function : " 360
+	if FAILURE
+		errormsg "Final Test appears to have stopped responding - Please Contact Tech OPS"
+		halt
+	endif
+	
+	Xmit_string = "COLLECT"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+	if Xmit_stat == 99
+		call Not_responding
+	endif
+	waitfor "<ENTER>" 360
+	if FAILURE
+		errormsg "Final Test appears to have stopped responding - Please Contact Tech OPS"
+		halt
+	endif
+	
+	transmit "^M"
+	waitfor "->" 360
+	if FAILURE
+		errormsg "Final Test appears to have stopped responding - Please Contact Tech OPS"
+		halt
+	endif
+	
+	for LINE = 0 upto 20
+		if LINE == 0
+			rget LOG_OUTPUT[LINE]
+		else
+			if strfind LOG_OUTPUT[LINE-1] "ENDDATA"
+				LOG_OUTPUT[LINE] = "ENDDATA"
+			else	
+				rget LOG_OUTPUT[LINE]
+			endif
+		endif
+	endfor
+	
+	;rget OUTPUT
+	;rget OUTPUT2
+	;rget OUTPUT3
+	;rget OUTPUT4
+	logDATA(TEST_TYPE)
+	
+	pause 2
+	transmit "^M"
+	waitfor "Test Function : " 360
+	if FAILURE
+		errormsg "The script failed to respond - Please Contact Tech OPS"
+		halt
+	endif
+	Xmit_string = "END"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+	if Xmit_stat == 99
+		call Not_responding
+	endif
+	   
+endproc
+;******************************************************************************
+
+;******************************************************************************
+;### Log into the 39XX ###
+proc logIN
+param string TEST_TYPE
+string Xmit_string = ""
+integer Xmit_stat = 0
+integer cliCHK = 0 ;cliCHK - 1=Telnet open 2=Linux CLI open
+
+if strfind TEST_TYPE "MANAGER"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+	if Xmit_stat == 99
+		call Not_responding
+	endif
+	waitfor "=>" 15
+	if FAILURE
+		errormsg "Telnet Session was unavailable!"
+		errormsg "CONTACT TECH OPS"
+		halt
+	else
+		statmsg "Telnet Session is available - Logging In NOW"
+	endif
+else
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+	if Xmit_stat == 99
+		call Not_responding
+	endif
+	waitfor "=>" 5
+	if FAILURE
+		statmsg "Telnet Session was unavailable"
+	else
+		statmsg "Telnet Session is available - Logging In NOW"
+		cliCHK = 1
+	endif
+	
+	if cliCHK == 0
+		Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+		waitfor "#" 5
+		if FAILURE
+			statmsg "Linux CLI was unavailable"
+		else
+			statmsg "Linux CLI session already active"
+			cliCHK = 2
+		endif
+	endif
+	
+	if cliCHK == 0
+		errormsg "Serial Console connectivity cannot be established!"
+		halt
+	endif
+	
+	if cliCHK == 1
+		Xmit_string = "exit"
+		Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+	
+		pause 1
+	
+		Xmit_string = "start linux console"
+		Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+		waitfor "login:" 5
+		if FAILURE
+			errormsg "login prompt did not start"
+			halt
+		endif
+	
+		Xmit_string = "root"
+		Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+		waitfor "word:" 5
+		if FAILURE
+			errormsg "password prompt did not start"
+			halt
+		endif
+	
+		transmit "r00tme^M"
+		waitfor "#" 5
+		if FAILURE
+			errormsg "linux console did not start"
+			halt
+		endif
+	endif
+endif
+	
+endproc
+;******************************************************************************
+
+;******************************************************************************
+;### Collect Tech ID via this process ###
+func getTECHID : string
+string TechList = "STJAMESQ,BLANCHETTED,MCCORMACKT,CRONINJ,MARTINEZE,MOUNT,NGUYEND,LALLIA,OSARIOD,VIVIERL"
+string Techid = "STJAMESQ"
+integer Event
+
+   dialogbox 0 55 96 200 158 11 "Please Select Your Tech ID"
+      listbox 1 5 5 180 80 TechList single Techid sort
+      pushbutton 2 56 104 80 28 "&Select" ok default
+   enddialog
+   while 1
+      dlgevent 0 Event                 ; Get the dialog event.
+
+      switch Event                     ; Evaluate the event.
+         case 0                        ; No event occurred.
+         endcase
+         case 1                        ; Something was chosen.
+            ;usermsg "`"%s`" selected!" Techid
+         endcase
+         default                       ; Exit case chosen.
+            exitwhile                  ; Exit the loop.
+         endcase
+      endswitch
+   endwhile
+   dlgdestroy 0 CANCEL                 ; Destroy the dialog box.
+   strreplace Techid  "(" "-"
+   strreplace Techid  ")" ""
+   
+return Techid
+endfunc
+;******************************************************************************
+
+;******************************************************************************
+;### Collect Tech ID via this process ###
+func getTESTTYPE : string
+string TestList = "P-BLADE,FULL SWITCH,PFS MANAGER"
+string TestID = "P-BLADE"
+integer Event
+
+   dialogbox 0 55 96 200 158 11 "Which type of system are you testing?"
+      listbox 1 5 5 180 80 TestList single TestID sort
+      pushbutton 2 56 104 80 28 "&Select" ok default
+   enddialog
+   while 1
+      dlgevent 0 Event                 ; Get the dialog event.
+
+      switch Event                     ; Evaluate the event.
+         case 0                        ; No event occurred.
+         endcase
+         case 1                        ; Something was chosen.
+            ;usermsg "`"%s`" selected!" TestID
+         endcase
+         default                       ; Exit case chosen.
+            exitwhile                  ; Exit the loop.
+         endcase
+      endswitch
+   endwhile
+   dlgdestroy 0 CANCEL                 ; Destroy the dialog box.
+   
+return TestID
+endfunc
+;******************************************************************************
+
+;******************************************************************************
+;  This function converts the 294-xxxx software part number scanned from the MO into the software version
+;  SCAN_SW is passed from main proc and SWVER is returned to main proc
+
+func getSW_VER : string
+string SWVER
+string SCN_SW
+integer Len = 0
+
+while Len !=8
+	
+	sdlginput "SOFTWARE" "Type/Scan the Doc Kit/SD Card Part Number E.G. 294-2852" SCN_SW
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else
+	strlen SCN_SW Len
+	   if Len !=8
+	 	 errormsg "NUMBER ENTERED IS NOT AN 8 DIGIT PART NUMBER"
+	   endif
+	endif
+endwhile
+	switch SCN_SW                    ; Variable to be evaluated
+	case "321-1649"								; version 03.02.00.30 DOC CD (no S/W KIT at this time)
+		SWVER = "03.02.00.30"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2850"								; SD Card part number w/ version 03.02.02.19
+		SWVER = "03.02.02.19"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2849"								; SD Card part number w/ version 03.02.03.10
+		SWVER = "03.02.03.10"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2837"								; PFS Management Server Restore DVD version 03.02.03.10
+		SWVER = "03.02.03.10"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2852"								; SD Card part number w/ version 03.03.000.045
+		SWVER = "03.03.000.045"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2860"								; SD Card part number w/ version 03.03.000.045
+		SWVER = "03.03.000.045"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2853"								; PM w/ PFS Server Restore DVD version 03.03.000.045
+		SWVER = "03.03.000.045"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2854"								; PFS Management Server Restore DVD version 03.03.000.045
+		SWVER = "03.03.000.045"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2896"								; SD Card part number w/ version 03.04.000.023
+		SWVER = "03.04.000.023"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2897"								; Programmed SD Card part number w/ version 03.04.001.011
+		SWVER = "03.04.001.011"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2898"								; PFS Management Server Restore DVD version 03.04.001.011
+		SWVER = "03.04.001.011"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2902"								; S/W Image part number w/ version 03.04.001.011
+		SWVER = "03.04.001.011"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2904"								; PFS Management Server Restore DVD version 03.04.000.023
+		SWVER = "03.04.000.023"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2903"								; PM w/ PFS Server Restore DVD version 03.04.000.023
+		SWVER = "03.04.000.023"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2985"								; S/W, Programmed micro SD, PFS v3.5
+		SWVER = "03.05.000.025"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2978"								; S/W, Restore DVD, R320 nGenius Packet Flow Switch Management Server v3.5
+		SWVER = "03.05.000.025"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2979"								; S/W, Restore DVD, R720 nGenius Packet Flow Switch Management Server v3.5
+		SWVER = "03.05.000.025"
+		statmsg "Software version is %s" SWVER
+	endcase
+	case "294-2980"								; S/W, Restore DVD, nGenius PFS Management Server with PM v3.5
+		SWVER = "03.05.000.025"
+		statmsg "Software version is %s" SWVER
+	endcase
+	default                       ; Exit case chosen.
+       	errormsg "This is an invalid S/W part number!"
+		halt
+       	;OUT_ARRAY[18] = "Software Version Not Supported." ;Failure_Reason
+    endcase
+	endswitch
+
+return SWVER
+endfunc
+;******************************************************************************
+
+;*************************************************************************
+;  This function prompts the user to Scan the Sales Order Number.
+;  The value is then passed back to the main program.
+ 
+func getSALESORDER : string
+integer Len = 0
+integer EXP_LEN = 7
+string SO_Number
+
+while Len != EXP_LEN
+	
+	sdlginput "SALES ORDER" "Please Type in the Sales Order Number E.G. 1014521" SO_Number
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else
+		if strfind SO_Number "DDK"
+			SO_Number = "2000DDK"
+		endif
+		if strfind SO_Number "PB"
+			SO_NUMBER = "10000PB"
+		endif
+		if strfind SO_Number "-"
+			EXP_LEN = 15
+		endif
+		
+		strlen SO_Number Len
+		
+		if Len != EXP_LEN
+			errormsg "NUMBER ENTERED IS NOT A VALID SALES ORDER NUMBER"
+	 	endif 
+ 	endif
+	
+endwhile	
+
+return SO_Number
+endfunc
+
+;*************************************************************************
+
+;***********************************************************************************
+;	this function will check if there is a valid IP for data transfer
+;   if there is not a valid IP, it will ask the user to provide a temporary IP
+;   then it will set the IP and transfer it back to the IP_ADDRESS value
+
+proc ipSET
+string IP
+string newIP = ""
+string Xmit_string
+integer Xmit_stat = 0
+
+	Xmit_string = "cd /HorizON"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+	if Xmit_stat == 99
+		call Not_responding
+	endif
+		
+	waitfor "/HorizON#" 5
+	if FAILURE
+		errormsg "Command is not responding"
+		halt
+	endif
+	
+	Xmit_string = "./shutdown.sh"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+	
+	waitfor "/HorizON#" 60
+	if FAILURE
+		errormsg "Command is not responding"
+		halt
+	endif
+	
+	Xmit_string = "ifconfig eth2"
+	IP = getSTATIC_IP()
+	statmsg "Using tech submitted IP address %s" IP
+	newIP = "10.100.150."
+	strcat newIP IP
+	strcat Xmit_string " "
+	strcat Xmit_string newIP	
+		;Xmit_string should now read "ifconfig eth0 10.100.150.IP"
+		Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+		
+	Xmit_string = "route add default gw 10.100.150.250"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+	
+	waitfor "No such process" 2
+	if FAILURE
+		statmsg "Default Gateway added succesfully!"
+	else
+		errormsg "Default Gateway could not be added! Trying Again"
+		Xmit_string = "ifconfig eth2 "
+		strcat Xmit_string newIP	
+		;Xmit_string should now read "ifconfig eth0 10.100.150.IP"
+		Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+		
+		Xmit_string = "route add default gw 10.100.150.250"
+		Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+		waitfor "No such process" 2
+		if FAILURE
+			statmsg "Default Gateway added succesfully!"
+		else
+			errormsg "Could not configure IP address!"
+			halt
+		endif
+	endif
+endproc
+;*******************************************************************************************
+
+;*******************************************************************************************
+;	this function will obtain the linux test script for 39XX systems
+;	if this function fails, it will halt the script and notify the user
+
+proc getSCRIPT
+string Xmit_string = ""
+integer Xmit_stat = 0
+integer CHK = 0
+	
+	transmit ""
+	transmit "[[ -d /opt/test ]] || mkdir /opt/test^M"
+	transmit "echo '#!/usr/bin/expect^M"
+	transmit "set timeout -1^M"
+	transmit "spawn scp -o user=nscp 10.100.150.45:/3900scripts/* /opt/test^M"
+	transmit "expect {^M"
+	transmit "`"(yes/no)? `" {send `"yes\r`" ; exp_continue}^M"
+	transmit "`"password: `" {send `"netscout\r`"}^M"
+	transmit "eof {log_file /var/log/EXP_ERR.log^M"
+	transmit "send_log `"ERROR: Could not establish a connection to the server`"}^M"
+	transmit "}^M"
+	transmit "expect eof' > /opt/test/upDATE.exp^M"
+	transmit "chmod +x /opt/test/upDATE.exp^M"
+	
+	Xmit_string = "/opt/test/upDATE.exp"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+	if Xmit_stat == 99
+		call Not_responding
+	endif
+	waitfor "/HorizON#" 5
+	if FAILURE
+		errormsg "Script was not 100% transferred"
+		halt
+	else
+		statmsg "Script was transferred succesfully"
+	endif
+		
+	Xmit_string = "./restart.sh"
+	Xmit_stat = Xmit_func (Xmit_string, &Xmit_stat)
+		if Xmit_stat == 99
+			call Not_responding
+		endif
+		
+	waitfor "/HorizON#" 60
+	if FAILURE
+		errormsg "Command is not responding"
+		halt
+	endif
+	
+endproc
+;******************************************************************************
+
+;******************************************************************************
+;  This function prompts the user for a static IP address
+;  It returns an IP that is in the 10.100.150.0/24 range and rejects all others
+
+func getSTATIC_IP : String
+string ScanIP
+integer CheckIP
+integer CHK = 0
+
+while CHK !=1
+	
+	sdlginput "STATIC IP ADDRESS" "Enter the LAST 2-3 digits of the IP Address (E.G. 182)" ScanIP
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else
+		atoi ScanIP CheckIP
+		if CheckIP > 50
+			if CheckIP < 255
+				CHK = 1
+			else
+				errormsg "NUMBER ENTERED IS NOT A VALID IP Address"
+			endif
+		else
+			errormsg "NUMBER ENTERED IS NOT A VALID IP Address"
+		endif
+	endif	   
+	
+endwhile
+
+return ScanIP
+endfunc
+;******************************************************************************
+
+;*************************************************************************
+;  This function prompts the user to enter the unit's Chassis serial number.
+;  A quick check is performed to ensure all digits are entered.
+;  If correct the value is then passed back to the main program.
+ 
+func getCHASSIS : string
+param string TEST_TYPE
+integer Len = 0
+integer MIN = 12
+string SNumber
+string MSG = "Enter the Chassis Serial Number E.G. "
+
+if strfind TEST_TYPE "MANAGER"
+	MIN = 7
+	strcat MSG "P35K032"
+else
+	strcat MSG "PR3131091102"
+endif
+
+while Len < MIN
+	
+	sdlginput "CHASSIS SERIAL" MSG SNumber
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else	
+		strlen SNumber Len
+	   if Len < MIN
+	 	 errormsg "SERIAL ENTERED IS NOT THE CORRECT LENGTH"
+	   endif
+	endif	   
+	
+endwhile	
+return SNumber
+endfunc
+;*************************************************************************
+
+;*************************************************************************
+;  This function prompts the user to enter the unit's Product ID
+;  A quick check is performed to ensure all digits are entered.
+;  If correct the value is then passed back to the main program.
+ 
+func getSERIAL : string
+string TITLE
+string MESSAGE
+integer Len = 0
+integer EXP_LEN
+string SNumber
+
+	TITLE = "PRODUCT ID"
+	MESSAGE = "Type/Scan PRODUCT ID KEY"
+	EXP_LEN = 26
+
+while Len < EXP_LEN
+	
+	sdlginput TITLE MESSAGE SNumber
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else	
+		strlen SNumber Len
+	   if Len < EXP_LEN
+	 	 errormsg "SERIAL ENTERED IS NOT THE CORRECT LENGTH"
+	   endif
+	endif	   
+	
+endwhile	
+return SNumber
+endfunc
+;*************************************************************************
+
+;*************************************************************************
+;  This function prompts the user to enter the unit's 12 digit MAC Address.
+;  A quick check is performed to ensure all 12 digits are entered.
+;  If correct the value is then passed back to the main program.
+ 
+func getMAC : string
+integer Len = 0
+string ScanMAC
+
+while Len !=17
+	
+	sdlginput "MAC ADDRESS" "Scan the unit's MAC ADDRESS" ScanMAC
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else	
+		strlen ScanMAC Len
+	   if Len !=17
+	 	 errormsg "NUMBER ENTERED IS NOT A VALID NETSCOUT MAC Address"
+	   endif
+	endif	   
+	
+endwhile
+
+return ScanMAC
+endfunc
+;*************************************************************************
+
+;*************************************************************************
+;  This function prompts the user to enter the Model Number.
+;  A quick check is performed to ensure that at least 4 digits are entered.
+;  If correct the value is then passed back to the main program.
+ 
+func getPBLADE_MODEL : string
+param integer data_index
+string BLADE_NUM
+integer Len = 0
+integer CutLen = 0
+integer INDX = data_index+1
+string TITLE = "P-BLADE "
+string TITLE2 = ": MODEL NUMBER"
+string MESSAGE = "Enter the MODEL # of slot "
+string MESSAGE2 = " E.G. 3900NBPC3100"
+string ScanModel
+
+itoa INDX BLADE_NUM
+strcat TITLE BLADE_NUM
+strcat TITLE TITLE2
+strcat MESSAGE BLADE_NUM
+strcat MESSAGE MESSAGE2
+
+while Len < 12
+	sdlginput TITLE MESSAGE ScanModel
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else	
+		strlen ScanModel Len
+	   if Len < 12
+	 	 errormsg "NUMBER ENTERED IS NOT A VALID NETSCOUT Model Number"
+	   endif
+	endif	   
+endwhile
+
+	strreplace ScanModel  " " ""
+	strreplace ScanModel  "/" ""
+
+return ScanModel
+endfunc
+;*******************************************************************************************
+
+;*************************************************************************
+;  This function prompts the user to enter the PBlade Serial.
+;  A quick check is performed to ensure that at least 11 digits are entered.
+;  If correct the value is then passed back to the main program.
+ 
+func getPBLADE_SERIAL : string
+param integer data_index
+string BLADE_NUM
+integer INDX = data_index+1
+integer Len = 0
+integer CutLen = 0
+string TITLE = "P-BLADE "
+string TITLE2 = ": SERIAL NUMBER"
+string MESSAGE = "SERIAL # of P-Blade in Slot "
+string MESSAGE2 = " E.G. 031801010038"
+string ScanSerial
+
+itoa INDX BLADE_NUM
+strcat TITLE BLADE_NUM
+strcat TITLE TITLE2
+strcat MESSAGE BLADE_NUM
+strcat MESSAGE MESSAGE2
+
+while Len < 12
+	sdlginput TITLE MESSAGE ScanSerial
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else	
+		strlen ScanSerial Len
+	   if Len < 12
+	 	 errormsg "NUMBER ENTERED IS NOT A VALID NETSCOUT SERIAL #"
+	   endif
+	endif
+
+endwhile
+	strreplace ScanSerial  " " ""
+	strreplace ScanSerial  "/" ""
+
+return ScanSerial
+endfunc
+;*******************************************************************************************
+
+;*************************************************************************
+;  This function prompts the user to enter the P-Blade Part Number.
+;  A quick check is performed to ensure that at least 10 digits are entered
+;  If correct the value is then passed back to the main program.
+
+func getPARTNUM : string
+integer Len = 0
+integer CutLen = 0
+string ScanPartNum
+
+while Len < 11
+	
+	sdlginput "P-BLADE PART NUMBER" "Enter the P-Blade Part E.G. 1040846-513" ScanPartNum
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else	
+		strlen ScanPartNum Len
+	   if Len < 11
+	 	 errormsg "NUMBER ENTERED IS NOT A VALID NETSCOUT Model Number"
+	   endif
+	endif	   
+	
+endwhile
+	strreplace ScanPartNum  " " ""
+	strreplace ScanPartNum  "/" ""
+
+return ScanPartNum
+endfunc
+;*******************************************************************************************
+
+;*************************************************************************
+;  This function prompts the user to enter the Model Number.
+;  A quick check is performed to ensure that at least 4 digits are entered.
+;  If correct the value is then passed back to the main program.
+ 
+func getMODEL : string
+param string TESTTYPE
+integer Len = 0
+integer EXP_Len = 12
+integer CutLen = 0
+string ScanModel
+string TITLE = "SWITCH MODEL NUMBER"
+string MSG = "Enter the Switch Model E.G. 3903NAPC3100"
+
+if strfind TESTTYPE "MANAGER"
+	TITLE = "PFS MANAGER MODEL NUMBER"
+	MSG = "Enter the PFS Manager Model E.G. 5512L-ENT"
+	EXP_Len = 9
+endif
+
+while Len < EXP_Len
+	
+	sdlginput TITLE MSG ScanModel
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else	
+		strlen ScanModel Len
+	   if Len < EXP_Len
+	 	 errormsg "NUMBER ENTERED IS NOT A VALID NETSCOUT Model Number"
+	   endif
+	endif	   
+	
+endwhile
+	strreplace ScanModel  " " ""
+	strreplace ScanModel  "/" ""
+
+return ScanModel
+endfunc
+;*******************************************************************************************
+
+;*************************************************************************
+;  This function prompts the user to enter the Item Number.
+;  A check is performed to see if the Model number is included in the item number.
+;  If correct the value is then passed back to the main program.
+ 
+func getITEM : string
+param string SCAN_MODEL
+integer Len = 0
+integer EXP_Len = 14
+string TITLE = "ITEM NUMBER"
+string MSG = "Enter the Item Number E.G. 3903NAPC3100-DDK"
+string ScanItem
+
+if strfind SCAN_MODEL "5512"
+	EXP_Len = 12
+	MSG = "Enter the Item Number E.G. 5512L-ENT-PB"
+endif
+
+while Len < EXP_Len
+	
+	sdlginput TITLE MSG ScanItem
+	if FAILURE
+		statmsg "User pressed cancel"
+		halt
+	else	
+	   strreplace ScanItem " " ""
+	   strreplace ScanItem "/" ""
+	   
+	   if strnicmp SCAN_MODEL ScanItem 4
+	   		strlen ScanItem Len
+	   else
+	 	 errormsg "NUMBER ENTERED IS NOT A VALID NETSCOUT Item Number"
+	 	 Len = 0
+	   endif
+	   
+	   if Len < EXP_Len
+			errormsg "Length of Item # is too short! Try Again"
+	   endif
+	endif   
+	
+endwhile
+
+
+return ScanItem
+endfunc
+;*************************************************************************
+
+;******************************************************************************
+;### Get number of PBLADES ###
+func getPBLADENUM : string
+string NumList = "1,2,3"
+string NUM = "1"
+integer Event
+
+   dialogbox 0 55 96 200 158 11 "How Many P-Blades in the 3903?"
+      listbox 1 5 5 180 80 NumList single NUM sort
+      pushbutton 2 56 104 80 28 "&Select" ok default
+   enddialog
+   while 1
+      dlgevent 0 Event                 ; Get the dialog event.
+
+      switch Event                     ; Evaluate the event.
+         case 0                        ; No event occurred.
+         endcase
+         case 1                        ; Something was chosen.
+            ;usermsg "`"%s`" P-Blades installed..." NUM
+         endcase
+         default                       ; Exit case chosen.
+            exitwhile                  ; Exit the loop.
+         endcase
+      endswitch
+   endwhile
+   dlgdestroy 0 CANCEL                 ; Destroy the dialog box.
+   
+return NUM
+endfunc
+;******************************************************************************
+
+;******************************************************************************
+;### This function will ask the user if there are additional licenses then ask the user to scan it in ###
+;### This function is designed so an additional amount of licenses can be scanned in up to hower many is ###
+;### needed, even though at this time there is only support in this script for 2 additional licenses.
+func getADD_LIC : string
+param integer LIC_ID
+integer Choice
+integer Len = 0
+integer EXP_Len = 12
+integer CutLen = 0
+string ScanLic = "NULL"
+string TITLE = "ADDITIONAL LICENSES"
+string MSG
+
+if LIC_ID == 1
+	MSG = "Do you have any additional licenses?"
+else
+	MSG = "Do you have another license to scan?"
+endif
+
+sdlgmsgbox TITLE MSG QUESTION YESNO Choice
+
+if Choice == 6 ;# The user chose "YES"
+	TITLE = "LICENSE MODEL NUMBER"
+	MSG = "Enter the License Model E.G. 3900NAPA2120"
+
+	while Len < EXP_Len
+		sdlginput TITLE MSG ScanLic
+		if FAILURE
+			statmsg "User pressed cancel"
+			halt
+		else	
+			strlen ScanLic Len
+			if Len < EXP_Len
+				errormsg "MODEL ENTERED IS NOT A VALID LENGTH - MUST BE 12 CHARACTERS"
+			endif
+		endif	   
+	endwhile
+	strreplace ScanLic  " " ""
+	strreplace ScanLic  "/" ""
+endif
+
+return ScanLic
+endfunc
+;******************************************************************************
+
+;******************************************************************************
+;This function sets the transmit string needed to test the current configuration
+proc scriptCALL
+param string TEST_TYPE
+param string SW_VER
+param string SCAN_SERIAL
+param string SCAN_MODEL
+param string TECH_ID
+param string SCAN_SO
+param string SCAN_ITEM
+param string SCAN_MAC
+param string SCN_PBLADE_NUM
+param string CHASSIS
+string DA_TE = $Date
+string TI_ME = $TIME24
+string ADD_LIC[10]
+integer INDX
+;param string PBLADE_MODEL_ONE
+;param string PBLADE_SERIAL_ONE
+;param string PBLADE_MODEL_TWO
+;param string PBLADE_SERIAL_TWO
+;param string PBLADE_MODEL_THREE
+;param string PBLADE_SERIAL_THREE
+string script_CALL = "./39XX_TEST.sh '"
+
+if not strfind TEST_TYPE "MANAGER"
+	;# Check for Additional Licenses #
+	ADD_LIC[1] = getADD_LIC(1)
+	for INDX = 2 upto 6
+		if not strfind ADD_LIC[INDX-1] "NULL"
+			ADD_LIC[INDX] = getADD_LIC(2)
+		else
+			ADD_LIC[INDX] = "NULL"
+		endif
+	endfor
+	
+	transmit "cd /opt/test^M"
+	waitfor "such file or directory" 4
+	if FAILURE
+		pause 1
+	else
+		errormsg "Are test scripts installed? Please Contact Tech OPS"
+		halt
+	endif
+	
+	transmit "./39XX_TEST.sh '"
+	transmit TEST_TYPE
+	transmit "' "
+	transmit SW_VER
+	transmit " "
+	transmit SCAN_SERIAL 
+	transmit " "
+	transmit SCAN_MODEL 
+	transmit " "
+	transmit DA_TE 
+	transmit " "
+	transmit TI_ME 
+	transmit " "
+	transmit TECH_ID 
+	transmit " "
+	transmit SCAN_SO 
+	transmit " "
+	transmit SCAN_ITEM 
+	transmit " "
+	transmit SCAN_MAC 
+	transmit " "
+	transmit CHASSIS 
+	transmit " "
+	transmit PBLADE_SERIAL[0] 
+	transmit " "
+	transmit PBLADE_MODEL[0] 
+	transmit " "
+	transmit PBLADE_SERIAL[1] 
+	transmit " "
+	transmit PBLADE_MODEL[1] 
+	transmit " "
+	transmit PBLADE_SERIAL[2] 
+	transmit " "
+	transmit PBLADE_MODEL[2] 
+	transmit " "
+	transmit SCN_PBLADE_NUM
+	for INDX = 1 upto 6
+		if not strfind ADD_LIC[INDX] "NULL"
+			transmit " "
+			transmit ADD_LIC[INDX]
+		endif
+	endfor
+endif
+	
+endproc
+;*******************************************************************************************
+
+;*************************************************************************
+;This script collects the OUTDATA to Oracle
+proc logDATA
+;param string OUTPUT
+;param string OUTPUT2
+;param string OUTPUT3
+;param string OUTPUT4
+param string TEST_TYPE
+integer LINE
+string OUTFILE = "K:\MFG_TEST\39XX_log.txt"
+
+TEST_TYPE = "39XX"
+
+for LINE = 0 upto 20
+	if strfind LOG_OUTPUT[LINE] "ENDDATA"
+		LOG_OUTPUT[LINE] = ""
+	endif
+endfor
+
+;if strfind OUTPUT2 "ENDDATA"
+;	OUTPUT2 = ""
+;endif
+;if strfind OUTPUT3 "ENDDATA"
+;	OUTPUT3 = ""
+;endif
+;if strfind OUTPUT4 "ENDDATA"
+;	OUTPUT4 = ""
+;endif
+
+	if fopen 1 OUTFILE APPEND
+		for LINE = 0 upto 20
+			fputs 1 LOG_OUTPUT[LINE]
+		endfor
+		;fputs 1 OUTPUT1
+		;fputs 1 OUTPUT2
+		;fputs 1 OUTPUT3
+		;fputs 1 OUTPUT4
+		fclose 1
+		if fopen 1 OUTFILE APPEND TEXT
+			fputs 1 ""
+			fclose 1
+		endif
+	else
+		;try again
+		pause 5
+		if fopen 1 OUTFILE APPEND
+			for LINE = 0 upto 20
+				fputs 1 LOG_OUTPUT[LINE]
+			endfor
+			if fopen 1 OUTFILE APPEND TEXT
+				fputs 1 ""
+				fclose 1
+			endif
+		else
+			errormsg "Problem opening file %s.  Data has not been saved" OUTFILE
+		endif
+	endif
+
+endproc
+;*******************************************************************************************
+;*******************************************************************************************
+;This function performs a reliable transmition of a character string to the probe. 
+;It accepts the string to transmit as a variable passed by reference.
+;It checks to see if the line is clear before transmitting.
+;It checks each echo character returning from the probe before transmitting another character.
+;It returns an error if the transmition was not successfull after attempts.  
+       
+
+func xmit_func : integer
+param string xmit_string
+param integer stat_xmit
+integer string_length
+string xmit_char
+integer char_index
+integer xmit_fail
+xmit_fail = 0						;Initialize Xmit_fail to 0
+        waitquiet 1 FOREVER				;Wait till the line is quiet before transmitting.
+  	strlen xmit_string string_length		;Get the length of the string to be transmitted.
+	string_length = string_length - 1		;subtract 1 from string length to make up for 0 index
+	;usermsg "string length is %i" string_length	;Report the string length for debugging
+	for char_index = 0 upto string_length		;Initialize char_index and increment by 1 each loop		
+	  ;usermsg "char_index is %i" char_index	;Report the character index for debugging
+	  substr xmit_char xmit_string char_index 1	;Get the indexed character from the string
+	  ;waitquiet 1 FOREVER				;Wait till line is quiet befor transmitting
+	  transmit xmit_char				;Transmit the  indexed character of the string
+	  waitfor xmit_char 2				;Wait 2 seconds before timing out
+		if FAILURE
+                   xmit_fail ++
+                   char_index --
+                   ;usermsg "xmit_fail is %i" xmit_fail
+                   if xmit_fail == 4
+                      ;usermsg "Problem communicating with Probe. Please check that Probe is ON and the Serial cable is connected to the Console Port."
+                      stat_xmit = 99
+                      ;usermsg "stat_xmit is %i" stat_xmit
+                      return stat_xmit
+                   endif
+		else
+		   xmit_fail = 0
+		   stat_xmit = 1
+	        endif
+	endfor
+   transmit "^M"	        
+return stat_xmit	
+endfunc		
+;*************************************************************************
+
+;*************************************************************************
+;This procedure displays a message box and halts the script.
+
+proc Not_responding
+
+  usermsg "Server is not responding! Please make sure System is running (powered on) and the Serial Console Cable is connected to the Console port." 
+  ;set txpace 1  ;restore transmit pacing to normal         
+  ;winrestore $PWMAINWIN
+  halt
+  
+endproc
+;*******************************************************************************************
+
+;**************************************************************************
+;### This procedure gets called if the Linux script runs into a failure ###
+;### it will collect all pertinent information to Oracle, then halt the test ###
+proc SCRIPT_FAILURE
+
+	errormsg "The Script has Failed! Please notify Tech OPS!"
+	halt
+
+endproc
+;*******************************************************************************************

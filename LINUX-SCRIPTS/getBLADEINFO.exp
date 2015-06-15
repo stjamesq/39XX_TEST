@@ -1,0 +1,40 @@
+#!/usr/bin/expect
+
+set ip [lindex $argv 0]
+
+set timeout -1
+spawn ssh 192.168.0.$ip
+expect {
+"(yes/no)? " {send "yes\r" ; exp_continue}
+"password: " {send "netscout\r"}
+"#" {send "\r"}
+eof {log_file /var/log/EXP_ERR.log
+send_log "ERROR: Could not establish a connection to the server"}
+}
+expect "#"
+send "if \[ -d /SCRIPTS \];then rm -rf /SCRIPTS;fi\r"
+expect "#"
+send "fdisk -l\r"
+expect "#"
+send "lspci -v\r"
+expect "#"
+send "cat /proc/cpuinfo\r"
+expect "#"
+send "sed -i '/DEBUG/c\REMOTE_TELNET_DEBUG=OFF' /HorizON/Server/ONPATH.CONF\r"
+expect "#"
+send "cat /HorizON/Server/ONPATH.CONF\r"
+expect "#"
+send "echo SSL_VER=\$(openssl version)\r"
+expect "#"
+send "telnet localhost 35000\r"
+expect "=>"
+send "bserial read\r"
+expect "=>"
+send "disp dev 0\r"
+expect "=>"
+send "binfo\r"
+expect "=>"
+send "exit\r"
+expect "#"
+send "logout\r"
+expect eof
